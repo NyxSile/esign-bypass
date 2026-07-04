@@ -1,0 +1,53 @@
+name: build-manifest
+
+on:
+  push:
+    paths:
+      - "*.ipa"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: найти самый новый ipa
+        id: pick
+        run: |
+          LATEST=$(ls -t *.ipa | head -n1)
+          echo "path=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$LATEST")" >> "$GITHUB_OUTPUT"
+
+      - name: собрать manifest.plist и version.json
+        run: |
+          source ./config.env
+          VERSION="$(date +%Y%m%d.%H%M)"
+          IPA_URL="${BASE_URL}/${{ steps.pick.outputs.path }}"
+
+          sed \
+            -e "s|__IPA_URL__|${IPA_URL}|g" \
+            -e "s|__BUNDLE_ID__|${BUNDLE_ID}|g" \
+            -e "s|__VERSION__|${VERSION}|g" \
+            -e "s|__APP_NAME__|${APP_NAME}|g" \
+            template.plist > manifest.plist
+
+          cat > version.json <<JSON
+          {
+            "version": "${VERSION}",
+            "app": "${APP_NAME}",
+            "ipa": "${{ steps.pick.outputs.name }}"
+          }
+          JSON
+
+      - name: закоммитить
+        run: |
+          git config user.name "ota-bot"
+          git config user.email "ota-bot@users.noreply.github.com"
+          git add manifest.plist version.json
+          git commit -m "auto: rebuild manifest for ${{ steps.pick.outputs.name }}" || echo "нечего коммитить"
+          git push
